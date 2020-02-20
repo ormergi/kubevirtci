@@ -7,5 +7,7 @@ containerdConfigPatches:
 networking:
   ipFamily: ipv6
   apiServerAddress: "::1"
+  disableDefaultCNI: true
+  podSubnet: "10.244.0.0/16"
 nodes:
 - role: control-plane
