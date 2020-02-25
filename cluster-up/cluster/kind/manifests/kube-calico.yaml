@@ -29,11 +29,13 @@ data:
           "nodename": "__KUBERNETES_NODE_NAME__",
           "mtu": __CNI_MTU__,
           "ipam": {
-              "type": "calico-ipam"
+              "type": "calico-ipam",
+              "assign_ipv6": "true",
+              "assign_ipv4": "false"
           },
           "container_settings": {
             "allow_ip_forwarding": true
-          }
+          },
           "policy": {
               "type": "k8s"
           },
@@ -45,6 +47,10 @@ data:
           "type": "portmap",
           "snat": true,
           "capabilities": {"portMappings": true}
+        },
+        {
+          "type": "bandwidth",
+          "capabilities": {"bandwidth": true}
         }
       ]
     }
@@ -391,6 +397,7 @@ rules:
       - networksets
       - clusterinformations
       - hostendpoints
+      - blockaffinities
     verbs:
       - get
       - list
@@ -497,7 +504,7 @@ spec:
         scheduler.alpha.kubernetes.io/critical-pod: ''
     spec:
       nodeSelector:
-        beta.kubernetes.io/os: linux
+        kubernetes.io/os: linux
       hostNetwork: true
       tolerations:
         # Make sure calico-node gets scheduled on all nodes.
@@ -518,7 +525,7 @@ spec:
         # It can be deleted if this is a fresh installation, or if you have already
         # upgraded to use calico-ipam.
         - name: upgrade-ipam
-          image: calico/cni:v3.8.6
+          image: calico/cni:v3.12.0
           command: ["/opt/cni/bin/calico-ipam", "-upgrade"]
           env:
             - name: KUBERNETES_NODE_NAME
@@ -540,7 +547,7 @@ spec:
         # This container installs the CNI binaries
         # and CNI network config file on each node.
         - name: install-cni
-          image: calico/cni:v3.8.6
+          image: calico/cni:v3.12.0
           command: ["/install-cni.sh"]
           env:
             # Name of the CNI config file to create.
@@ -576,7 +583,7 @@ spec:
         # Adds a Flex Volume Driver that creates a per-pod Unix Domain Socket to allow Dikastes
         # to communicate with Felix over the Policy Sync API.
         - name: flexvol-driver
-          image: calico/pod2daemon-flexvol:v3.8.6
+          image: calico/pod2daemon-flexvol:v3.12.0
           volumeMounts:
           - name: flexvol-driver-host
             mountPath: /host/driver
@@ -587,7 +594,7 @@ spec:
         # container programs network policy and routes on each
         # host.
         - name: calico-node
-          image: calico/node:v3.8.6
+          image: calico/node:v3.12.0
           env:
             # Use Kubernetes API as the backing datastore.
             - name: DATASTORE_TYPE
@@ -611,9 +618,13 @@ spec:
               value: "k8s,bgp"
             # Auto-detect the BGP IP address.
             - name: IP
+              value: "none"
+            - name: IP6
               value: "autodetect"
             # Enable IPIP
             - name: CALICO_IPV4POOL_IPIP
+              value: "Always"
+            - name: CALICO_IPV6POOL_IPIP
               value: "Always"
             # Set MTU for tunnel device used if ipip is enabled
             - name: FELIX_IPINIPMTU
@@ -626,6 +637,10 @@ spec:
             # no effect. This should fall within `--cluster-cidr`.
             - name: CALICO_IPV4POOL_CIDR
               value: "192.168.0.0/16"
+            - name: CALICO_IPV6POOL_CIDR
+              value: "fd00:10:244::/64"
+            - name: CALICO_ROUTER_ID
+              value: "hash"
             # Disable file logging so `kubectl logs` works.
             - name: CALICO_DISABLE_FILE_LOGGING
               value: "true"
@@ -634,7 +649,7 @@ spec:
               value: "ACCEPT"
             # Disable IPv6 on Kubernetes.
             - name: FELIX_IPV6SUPPORT
-              value: "false"
+              value: "true"
             # Set Felix logging to "info"
             - name: FELIX_LOGSEVERITYSCREEN
               value: "info"
@@ -648,9 +663,9 @@ spec:
           livenessProbe:
             exec:
               command:
-                - /bin/calico-node
-                - -felix-live
-                - -bird-live
+              - /bin/calico-node
+              - -felix-live
+              - -bird-live
             periodSeconds: 10
             initialDelaySeconds: 10
             failureThreshold: 6
@@ -658,8 +673,8 @@ spec:
             exec:
               command:
               - /bin/calico-node
-              - -bird-ready
               - -felix-ready
+              - -bird-ready
             periodSeconds: 10
           volumeMounts:
             - mountPath: /lib/modules
@@ -751,7 +766,7 @@ spec:
         scheduler.alpha.kubernetes.io/critical-pod: ''
     spec:
       nodeSelector:
-        beta.kubernetes.io/os: linux
+        kubernetes.io/os: linux
       tolerations:
         # Mark the pod as a critical add-on for rescheduling.
         - key: CriticalAddonsOnly
@@ -762,7 +777,7 @@ spec:
       priorityClassName: system-cluster-critical
       containers:
         - name: calico-kube-controllers
-          image: calico/kube-controllers:v3.8.6
+          image: calico/kube-controllers:v3.12.0
           env:
             # Choose which controllers to run.
             - name: ENABLED_CONTROLLERS
