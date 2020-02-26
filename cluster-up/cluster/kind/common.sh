@@ -114,7 +114,7 @@ function kind_up() {
         echo "ipv6 enabled, using kindnet"
         # currently kind does not fully support ipv6 or ipv6-DualStack,
         # when using diffrent CNI's.
-        #_kubectl create -f $KIND_MANIFESTS_DIR/kube-calico.yaml
+        _kubectl create -f $KIND_MANIFESTS_DIR/kube-calico.yaml
     fi
 
     _wait_kind_up
