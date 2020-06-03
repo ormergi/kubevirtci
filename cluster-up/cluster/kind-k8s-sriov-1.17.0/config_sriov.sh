@@ -12,6 +12,29 @@ WORKER_NODE_ROOT="${CLUSTER_NAME}-worker"
 
 OPERATOR_GIT_HASH=8d3c30de8ec5a9a0c9eeb84ea0aa16ba2395cd68  # release-4.4
 
+function ensure_pod {
+  namespace=$1
+  label=$2
+
+  intervals=6
+  timeout=10
+
+  if [[ $namespace != "" ]];then
+    namespace="-n $namespace"
+  fi
+
+  if [[ $label != "" ]];then
+    label="-l $label"
+  fi
+
+  count=0
+  until _kubectl get pod $namespace $label; do
+      ((count++)) && ((count == intervals)) && echo "Pods with $label not found" && exit 1
+      echo "[$count/$intervals] Waiting for pods with $label to create.."
+      sleep $timeout
+  done
+}
+
 function ensure_k8s_object {
   object_type=$1
   name=$2
@@ -146,10 +169,21 @@ sleep 60
 envsubst < $MANIFESTS_DIR/network_config_policy.yaml | _kubectl create -f -
 
 SRIOV_OPERATOR_NAMESPACE="sriov-network-operator"
+SRIOV_CNI_LABEL="app=sriov-cni"
+SRIOV_DEVICE_PLUGIN_LABEL="app=sriov-device-plugin"
 
 # Ensure SriovNetworkNodePolicy CR is created
 policy_name=$(cat $MANIFESTS_DIR/network_config_policy.yaml | grep 'name:' | awk '{print $2}')
 ensure_k8s_object "SriovNetworkNodePolicy" $policy_name $SRIOV_OPERATOR_NAMESPACE
+
+# Wait for sriov-operator to reconsile SriovNodeNetworkPolicy
+# and deploy cni and device-plugin pods
+ensure_pod $SRIOV_OPERATOR_NAMESPACE $SRIOV_CNI_LABEL
+ensure_pod $SRIOV_OPERATOR_NAMESPACE $SRIOV_DEVICE_PLUGIN_LABEL
+
+# Wait for cni and device-plugin pods to be ready
+_kubectl wait pods -n $SRIOV_OPERATOR_NAMESPACE -l $SRIOV_CNI_LABEL           --for condition=Ready --timeout 600s
+_kubectl wait pods -n $SRIOV_OPERATOR_NAMESPACE -l $SRIOV_DEVICE_PLUGIN_LABEL --for condition=Ready --timeout 600s
 
 
 ${SRIOV_NODE_CMD} chmod 666 /dev/vfio/vfio
