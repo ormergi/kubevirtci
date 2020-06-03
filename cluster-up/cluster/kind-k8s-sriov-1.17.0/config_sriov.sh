@@ -55,6 +55,22 @@ function ensure_k8s_object {
   done
 }
 
+function wait_for_taint_absence {
+  taint=$1
+
+  intervals=30
+  timeout=10
+  let "total = ($timeout * $intervals) / 60"
+
+  count=0
+  until [[ $(_kubectl get nodes -ocustom-columns=taints:.spec.taints[*].effect --no-headers | grep -i $taint) == "" ]]; do
+    ((count++)) && ((count == intervals)) && echo "Taint $taint did not removed after $total minutes" && exit 1
+    echo "[$count/$intervals] Waiting for taint $taint absence"
+    _kubectl get nodes -ocustom-columns=NAME:.metadata.name,TAINTS:.spec.taints[*].effect --no-headers
+    sleep $timeout
+  done
+}
+
 # not using kubectl wait since with the sriov operator the pods get restarted a couple of times and this is
 # more reliable
 function wait_pods_ready {
@@ -185,5 +201,7 @@ ensure_pod $SRIOV_OPERATOR_NAMESPACE $SRIOV_DEVICE_PLUGIN_LABEL
 _kubectl wait pods -n $SRIOV_OPERATOR_NAMESPACE -l $SRIOV_CNI_LABEL           --for condition=Ready --timeout 600s
 _kubectl wait pods -n $SRIOV_OPERATOR_NAMESPACE -l $SRIOV_DEVICE_PLUGIN_LABEL --for condition=Ready --timeout 600s
 
+# Wait for nodes NoSchedule taint to be removed
+wait_for_taint_absence "NoSchedule"
 
 ${SRIOV_NODE_CMD} chmod 666 /dev/vfio/vfio
