@@ -55,6 +55,22 @@ function ensure_k8s_object {
   done
 }
 
+function wait_for_taint {
+  taint=$1
+
+  intervals=30
+  timeout=10
+  let "total = ($timeout * $intervals) / 60"
+
+  count=0
+  until [[ $(_kubectl get nodes -ocustom-columns=taints:.spec.taints[*].effect --no-headers | grep -i $taint) != "" ]]; do
+    ((count++)) && ((count == intervals)) && echo "Taint $taint did not present after $total minutes" && exit 1
+    echo "[$count/$intervals] Waiting for taint $taint to present"
+    _kubectl get nodes -ocustom-columns=NAME:.metadata.name,TAINTS:.spec.taints[*].effect --no-headers
+    sleep $timeout
+  done
+}
+
 function wait_for_taint_absence {
   taint=$1
 
@@ -178,8 +194,10 @@ _kubectl patch validatingwebhookconfiguration operator-webhook-config --patch '{
 _kubectl patch mutatingwebhookconfiguration network-resources-injector-config --patch '{"webhooks":[{"name":"network-resources-injector-config.k8s.io", "clientConfig": { "caBundle": "'"$(cat $CSRCREATORPATH/network-resources-injector.cert)"'" }}]}'
 _kubectl patch mutatingwebhookconfiguration operator-webhook-config --patch '{"webhooks":[{"name":"operator-webhook.sriovnetwork.openshift.io", "clientConfig": { "caBundle": "'"$(cat $CSRCREATORPATH/operator-webhook.cert)"'" }}]}'
 
-# we need to sleep to wait for the configuration above the be picked up
-sleep 60
+# Wait caBundle reconcile to finish by waiting for the "NoSchedule" taint
+# to present and then absent.
+wait_for_taint "NoSchedule"
+wait_for_taint_absence "NoSchedule"
 
 # Substitute NODE_PF and NODE_PF_NUM_VFS then create SriovNetworkNodePolicy CR
 envsubst < $MANIFESTS_DIR/network_config_policy.yaml | _kubectl create -f -
