@@ -97,6 +97,28 @@ function wait_pods_ready {
     done
 }
 
+function ensure_allocatable_resource {
+  node=$1
+  resource_name=$2
+  expected_value=$3
+
+  intervals=30
+  timeout=10
+
+  count=0
+  resource_name=$(echo $resource_name | sed s/\\./\\\\\./g)
+  current_value=$(_kubectl get node $node -o "custom-columns=CAPACITY:.status.allocatable.$resource_name" --no-headers)
+  until [[ $current_value == $expected_value ]];do
+    ((count++)) && ((count == intervals)) && "node $node doesnt have allocatabale resource $resource_name:$expected_value" && exit 1
+    echo "$node node should have allocateable resource:
+      $resource_name: $expected_value 
+      got:
+      $resource_name: $current_value"
+    current_value=$(_kubectl get node $node -o "custom-columns=CAPACITY:.status.allocatable.$resource_name" --no-headers)
+    sleep $timeout
+  done
+}
+
 function deploy_sriov_operator {
   operator_path=${KUBEVIRTCI_CONFIG_PATH}/$KUBEVIRT_PROVIDER/sriov-network-operator-${OPERATOR_GIT_HASH}
   if [ ! -d $operator_path ]; then
@@ -221,5 +243,9 @@ _kubectl wait pods -n $SRIOV_OPERATOR_NAMESPACE -l $SRIOV_DEVICE_PLUGIN_LABEL --
 
 # Wait for nodes NoSchedule taint to be removed
 wait_for_taint_absence "NoSchedule"
+
+# Vefify that sriov node has SRIOV VFs allocatable resource 
+resource_name=$(cat $MANIFESTS_DIR/network_config_policy.yaml | grep 'resourceName:' | awk '{print $2}')
+ensure_allocatable_resource $SRIOV_NODE "openshift.io/$resource_name" $NODE_PF_NUM_VFS
 
 ${SRIOV_NODE_CMD} chmod 666 /dev/vfio/vfio
