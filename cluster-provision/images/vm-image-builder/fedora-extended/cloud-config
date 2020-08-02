@@ -1,0 +1,25 @@
+#cloud-config
+password: fedora
+chpasswd: { expire: False }
+ssh_pwauth: yes
+write_files:
+    - path: /etc/modules-load.d/mlx5.conf
+      content: |
+        mlx5_core
+        mlx5_ib
+    - path: /etc/modules-load.d/mlx4.conf
+      content: |
+        mlx4_core
+        mlx4_ib
+    - path: /etc/modules-load.d/i40e.conf
+      content: |
+        i40e
+    - path: /etc/modules-load.d/igb.conf
+      content: |
+        igb
+bootcmd:
+  - dnf install -y kernel-modules-$(uname -r) qemu-guest-agent
+  - dnf clean all
+runcmd:
+  - sudo systemctl enable -now qemu-guest-agent
+  - sudo shutdown -h now
