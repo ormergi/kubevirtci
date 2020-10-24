@@ -15,6 +15,9 @@ REGISTRY_NAME=${CLUSTER_NAME}-registry
 MASTER_NODES_PATTERN="control-plane"
 WORKER_NODES_PATTERN="worker"
 
+KIND_VERSION="v0.9.0"
+KIND_URL="https://github.com/kubernetes-sigs/kind/releases/download/$KIND_VERSION/kind-linux-amd64"
+
 function _wait_kind_up {
     echo "Waiting for kind to be ready ..."
     while [ -z "$(docker exec --privileged ${CLUSTER_NAME}-control-plane kubectl --kubeconfig=/etc/kubernetes/admin.conf get nodes --selector=node-role.kubernetes.io/master -o=jsonpath='{.items..status.conditions[-1:].status}' | grep True)" ]; do
@@ -32,7 +35,7 @@ function _wait_containers_ready {
 
 function _fetch_kind() {
     if [ ! -f ${KUBEVIRTCI_CONFIG_PATH}/$KUBEVIRT_PROVIDER/.kind ]; then
-        wget https://github.com/kubernetes-sigs/kind/releases/download/v0.7.0/kind-linux-amd64 -O ${KUBEVIRTCI_CONFIG_PATH}/$KUBEVIRT_PROVIDER/.kind
+        wget $KIND_URL -nv -S -O ${KUBEVIRTCI_CONFIG_PATH}/$KUBEVIRT_PROVIDER/.kind
         chmod +x ${KUBEVIRTCI_CONFIG_PATH}/$KUBEVIRT_PROVIDER/.kind
     fi
     KIND=${KUBEVIRTCI_CONFIG_PATH}/$KUBEVIRT_PROVIDER/.kind
