@@ -6,7 +6,7 @@ DOCKER="${CONTAINER_RUNTIME:-docker}"
 
 export IPV6_CNI="yes"
 export CLUSTER_NAME="kind-1.17.0"
-export KIND_NODE_IMAGE="kindest/node:v1.17.0"
+export KIND_NODE_IMAGE="v1.17.11@sha256:5240a7a2c34bf241afb54ac05669f8a46661912eab05705d660971eeb12f6555"
 
 source ${KUBEVIRTCI_PATH}/cluster/kind/common.sh
 
