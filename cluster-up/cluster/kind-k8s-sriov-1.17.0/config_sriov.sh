@@ -185,6 +185,14 @@ function deploy_multus {
   return 0
 }
 
+function _csrcreator {
+  pushd ${CSRCREATORPATH}
+  kube_api_address=$(docker inspect sriov-control-plane --format '{{ .NetworkSettings.IPAddress}}')
+  sed s?"127.0.0.1:\([0-9]*\)"?"$kube_api_address:6443"?g $KUBECONFIG_PATH > config
+    docker run --privileged --rm -v ${PWD}:/workdir -w /workdir golang:1.13.8-alpine3.11 go run . -kubeconfig "config" "$@";
+  popd
+}
+
 function deploy_sriov_operator {
   echo 'Downloading the SR-IOV operator'
   operator_path=${KUBEVIRTCI_CONFIG_PATH}/$KUBEVIRT_PROVIDER/sriov-network-operator-${OPERATOR_GIT_HASH}
@@ -202,14 +210,12 @@ function deploy_sriov_operator {
     export SRIOV_CNI_IMAGE=quay.io/openshift/origin-sriov-cni:${RELEASE_VERSION}
     export SRIOV_DEVICE_PLUGIN_IMAGE=quay.io/openshift/origin-sriov-network-device-plugin:${RELEASE_VERSION}
     export OPERATOR_EXEC=${KUBECTL}
-    make deploy-setup-k8s SHELL=/bin/bash  # on prow nodes the default shell is dash and some commands are not working
+    #make deploy-setup-k8s SHELL=/bin/bash  # on prow nodes the default shell is dash and some commands are not working
   popd
 
   echo 'Generating webhook certificates for the SR-IOV operator webhooks'
-  pushd "${CSRCREATORPATH}"
-    go run . -namespace sriov-network-operator -secret operator-webhook-service -hook operator-webhook -kubeconfig $KUBECONFIG_PATH || return 1
-    go run . -namespace sriov-network-operator -secret network-resources-injector-secret -hook network-resources-injector -kubeconfig $KUBECONFIG_PATH || return 1
-  popd
+  _csrcreator -namespace sriov-network-operator -secret operator-webhook-service -hook operator-webhook || return 1
+  _csrcreator -namespace sriov-network-operator -secret network-resources-injector-secret -hook network-resources-injector || return 1
 
   echo 'Setting caBundle for SR-IOV webhooks'
   wait_k8s_object "validatingwebhookconfiguration" "operator-webhook-config" || return 1
