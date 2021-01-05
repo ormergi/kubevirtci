@@ -7,14 +7,14 @@ if [ -z "${KUBEVIRTCI_TAG}" ] && [ -z "${KUBEVIRTCI_GOCLI_CONTAINER}" ]; then
     exit 1
 fi
 
-if [ -n "${KUBEVIRTCI_TAG}" ] && [ -n "${KUBEVIRTCI_GOCLI_CONTAINER}" ]; then
-    echo "WARNING: KUBEVIRTCI_GOCLI_CONTAINER is set and will take precedence over the also set KUBEVIRTCI_TAG"
-fi
+#if [ -n "${KUBEVIRTCI_TAG}" ] && [ -n "${KUBEVIRTCI_GOCLI_CONTAINER}" ]; then
+#    echo "WARNING: KUBEVIRTCI_GOCLI_CONTAINER is set and will take precedence over the also set KUBEVIRTCI_TAG"
+#fi
 
 if [ "${KUBEVIRTCI_RUNTIME}" = "podman" ]; then
     _cli="pack8s"
 else
-    _cli_container="${KUBEVIRTCI_GOCLI_CONTAINER:-kubevirtci/gocli:${KUBEVIRTCI_TAG}}"
+    _cli_container="${KUBEVIRTCI_GOCLI_CONTAINER:-kubevirtci/gocli:latest}"
     _cli="docker run --privileged --net=host --rm ${USE_TTY} -v /var/run/docker.sock:/var/run/docker.sock"
     # gocli will try to mount /lib/modules to make it accessible to dnsmasq in
     # in case it exists
