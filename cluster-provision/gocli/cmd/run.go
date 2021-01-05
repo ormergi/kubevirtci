@@ -478,6 +478,9 @@ func run(cmd *cobra.Command, args []string) (retErr error) {
 					Type:   "volume",
 					Source: vol.Name,
 					Target: "/var/run/disk",
+					TmpfsOptions: &mount.TmpfsOptions{
+						SizeBytes: 37580963840,
+					},
 				},
 			},
 			Privileged:  true,
