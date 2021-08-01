@@ -35,7 +35,7 @@ else
     fi
 fi
 
-_cli_container="${KUBEVIRTCI_GOCLI_CONTAINER:-quay.io/kubevirtci/gocli:${KUBEVIRTCI_TAG}}"
+_cli_container=quay.io/kubevirtci/gocli:latest
 _cli="${_cri_bin} run --privileged --net=host --rm ${USE_TTY} -v ${_docker_socket}:/var/run/docker.sock"
 # gocli will try to mount /lib/modules to make it accessible to dnsmasq in
 # in case it exists
@@ -81,7 +81,9 @@ function _add_common_params() {
         params=" --nfs-data $RHEL_NFS_DIR $params"
     fi
     if [ -n "${KUBEVIRTCI_PROVISION_CHECK}" ]; then
-        params=" --container-registry=quay.io --container-suffix=:latest $params"
+        params=" --container-registry=quay.io --container-suffix=latest $params"
+    else
+        params="--container-suffix=${KUBEVIRTCI_TAG} $params"
     fi
 
     if [ $KUBEVIRT_WITH_ETC_IN_MEMORY == "true" ]; then

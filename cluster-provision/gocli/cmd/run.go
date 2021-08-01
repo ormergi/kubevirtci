@@ -460,10 +460,14 @@ func run(cmd *cobra.Command, args []string) (retErr error) {
 	end := (sriovDeviceCountPerNode - 1)
 	sriovDevicesPciAddrListPerNodeList := [][]string{}
 	for nodeIdx := 0; nodeIdx < int(nodes); nodeIdx++ {
+		logrus.Infof("DEBUG: start: %d end %d", start, end)
 		currentNodeSriovDevicessAddrs := sriovDevicesPciAddrs[start : end+1]
 		sriovDevicesPciAddrListPerNodeList = append(sriovDevicesPciAddrListPerNodeList, currentNodeSriovDevicessAddrs)
 		start = end + 1
 		end = start + (sriovDeviceCountPerNode - 1)
+	}
+	for _, array := range sriovDevicesPciAddrListPerNodeList {
+		logrus.Infof("DEBUG: sriovDevicesPciAddrListPerNodeList: \n%+v\n", array)
 	}
 
 	for x := 0; x < int(nodes); x++ {
@@ -528,6 +532,7 @@ func run(cmd *cobra.Command, args []string) (retErr error) {
 				},
 			}
 			currentNodeSriovDevicesPciAddrList := sriovDevicesPciAddrListPerNodeList[x]
+			logrus.Infof("DEBUG: node index: %d \ncurrentNodeSriovDevicesPciAddrList[%d]: \n%+v ", x, currentNodeSriovDevicesPciAddrList)
 			for _, sriovDevicePciAddr := range currentNodeSriovDevicesPciAddrList {
 				iommu_group, err := getPCIDeviceIOMMUGroup(sriovDevicePciAddr)
 				if err != nil {
@@ -544,6 +549,7 @@ func run(cmd *cobra.Command, args []string) (retErr error) {
 				nodeQemuArgs = fmt.Sprintf("%s -device vfio-pci,host=%s", nodeQemuArgs, sriovDevicePciAddr)
 			}
 		}
+		logrus.Infof("DEBUG: sriovDeviceMappings: \n%+v", sriovDeviceMappings)
 		deviceMappings = append(deviceMappings, sriovDeviceMappings...)
 
 		additionalArgs := []string{}
@@ -645,10 +651,16 @@ func run(cmd *cobra.Command, args []string) (retErr error) {
 
 		if sriovDeviceCountPerNode > 0 {
 			// move the assigned PCI device to a vfio-pci driver to prepare for assignment
+			logrus.Info("DEBUG: check sriovDevicesPciAddrListPerNodeList[x] not null")
 			if sriovDevicesPciAddrListPerNodeList[x] != nil {
+				logrus.Info("DEBUG: check sriovDevicesPciAddrListPerNodeList[x] not null-PASS")
+				logrus.Info("DEBUG: sriovDevicesPciAddrListPerNodeList[x]: \n%+v", sriovDevicesPciAddrListPerNodeList[x])
 				for _, sriovDeviceAddr := range sriovDevicesPciAddrListPerNodeList[x] {
+					logrus.Info("DEBUG: before prepareDeviceForAssignment, sriovDeviceAddr %+v", sriovDeviceAddr)
 					err = prepareDeviceForAssignment(cli, nodeContainer(prefix, nodeName), "", sriovDeviceAddr)
+					logrus.Info("DEBUG: before prepareDeviceForAssignment-PASS, sriovDeviceAddr %+v", sriovDeviceAddr)
 					if err != nil {
+						logrus.Info("DEBUG: before prepareDeviceForAssignment-FAIL, sriovDeviceAddr %+v", sriovDeviceAddr)
 						return err
 					}
 				}
