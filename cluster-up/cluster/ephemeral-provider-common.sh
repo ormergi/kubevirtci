@@ -94,6 +94,10 @@ function _add_common_params() {
         params=" --enable-istio $params"
     fi
 
+     if [ $KUBEVIRT_WITH_SRIOV == "true" ]; then
+        params=" --sriov-devices-per-node $KUBEVIRT_SRIOV_DEVICES_PER_NODE --sriov-devices-pci-addresses $KUBEVIRT_SRIOV_PCI_ADDRESSES $params"
+    fi
+
     # alternate (new) way to specify storage providers
     if [[ $KUBEVIRT_STORAGE == "rook-ceph-default" ]] && [[ $KUBEVIRT_PROVIDER_EXTRA_ARGS != *"--enable-ceph"* ]]; then
         params=" --enable-ceph $params"

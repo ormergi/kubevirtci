@@ -1,10 +1,50 @@
 #!/usr/bin/env bash
 
-set -e
+set -ex
 
 source ${KUBEVIRTCI_PATH}/cluster/ephemeral-provider-common.sh
 
 function up() {
+    # stage 1
+    if [ "$KUBEVIRT_WITH_SRIOV" == "true" ]; then
+        export KUBEVIRT_NUM_NODES=1
+        export KUBEVIRT_MEMORY_SIZE=8G
+        export VFS_DRIVER="vfio-pci"
+        export KUBEVIRT_SRIOV_DEVICES_PER_NODE="${KUBEVIRT_SRIOV_DEVICES_PER_NODE:-5}"
+        
+        # create and configure vfs on host
+        source "${KUBEVIRTCI_PATH}/cluster/${KUBEVIRT_PROVIDER}/sriov-node/node.sh"
+        pfs_names=($(node::discover_host_pfs))
+        pfs_names="${pfs_names[@]:0:$KUBEVIRT_NUM_NODES}"
+        [ ${#pfs_names[@]} -lt $KUBEVIRT_NUM_NODES ] && echo "FATAL: there are not enough PF's" && exit 1
+        
+        vfs=()
+        for i in $(seq $KUBEVIRT_NUM_NODES); do  
+            pf="${pf_names[$i]}"
+        
+            node::create_vfs "/sys/class/net/$pf/device" "$KUBEVIRT_SRIOV_DEVICES_PER_NODE"
+            
+            # configure driver
+            vfs_sys_devices=($(find /sys/class/net/$pf/device/virtfn*))
+            for vf_device in "${vfs_sys_devices[@]}"; do
+                node::configure_vf_driver "$(readlink -e $vf_device)" "$VFS_DRIVER"
+            done
+
+            # configure vfs
+            for i in $(seq $KUBEVIRT_SRIOV_DEVICES_PER_NODE); do
+                ip link set dev $pf vf $((i-1)) state enable
+                ip link set dev $pf vf $((i-1)) mac "02:00:00:00:00:0$i"
+            done
+            
+            # get vfs addresses
+            vfs+=($(realpath /sys/class/net/$pf/device/virtfn[0-${KUBEVIRT_SRIOV_DEVICES_PER_NODE}] | xargs -I{}  basename {}))
+        done
+        # format vfs addresses to be comma separated
+        vfs="${vfs[@]}"
+        vfs="${vfs// /,}"
+        export KUBEVIRT_SRIOV_PCI_ADDRESSES=""${vfs}""
+    fi
+
     params=$(echo $(_add_common_params))
     if [[ ! -z $(echo $params | grep ERROR) ]]; then
         echo -e $params
@@ -79,5 +119,24 @@ function up() {
             echo "waiting istio-operator to be healthy failed"
             exit 1
         fi
+    fi
+    
+    # stage 2
+    if [ "$KUBEVIRT_WITH_SRIOV" == "true" ]; then
+        kubectl="${KUBEVIRTCI_CONFIG_PATH}/$KUBEVIRT_PROVIDER/.kubectl"
+        source "${KUBEVIRTCI_PATH}/cluster/${KUBEVIRT_PROVIDER}/sriov-components/sriov_components.sh"
+        # label sriov capabel nodes
+        SRIOV_NODE_LABEL_KEY="sriov_capable"
+        SRIOV_NODE_LABEL_VALUE="true"
+        for node in $($kubectl get no --no-headers | awk '{print $1}'); do
+            $kubectl label nodes $node "${SRIOV_NODE_LABEL_KEY}=${SRIOV_NODE_LABEL_VALUE}"
+        done
+        
+        # deploy sriov components
+        sriov_components::deploy_multus
+        sriov_components::deploy \
+            "$VFS_DRIVER" \
+            "kubevirt.io" "sriov_net" \
+            "$SRIOV_NODE_LABEL_KEY" "$SRIOV_NODE_LABEL_VALUE"
     fi
 }

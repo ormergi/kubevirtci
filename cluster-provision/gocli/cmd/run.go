@@ -98,6 +98,8 @@ func NewRunCommand() *cobra.Command {
 	run.Flags().String("gpu", "", "pci address of a GPU to assign to a node")
 	run.Flags().Bool("run-etcd-on-memory", false, "configure etcd to run on RAM memory, etcd data will not be persistent")
 	run.Flags().String("etcd-capacity", "512M", "set etcd data mount size.\nthis flag takes affect only when 'run-etcd-on-memory' is specified")
+	run.Flags().Uint("sriov-devices-per-node", 1, "Number of SRIOV VF's to assign to each node")
+	run.Flags().StringSlice("sriov-devices-pci-addresses", nil, "List of SRIOV VF's pci addresses that will assign to cluster nodes")
 
 	return run
 }
@@ -243,6 +245,17 @@ func run(cmd *cobra.Command, args []string) (retErr error) {
 	}
 	resource.MustParse(etcdDataMountSize)
 
+	sriovDevicesPerNode, err := cmd.Flags().GetUint("sriov-devices-per-node")
+	if err != nil {
+		return err
+	}
+
+	sriovDevicesPciAddrs, err := cmd.Flags().GetStringSlice("sriov-devices-pci-addresses")
+	if err != nil {
+		return err
+	}
+	logrus.Infof("\nsriov devices addrs:\n%+v\n", sriovDevicesPciAddrs)
+
 	cli, err = client.NewEnvClient()
 	if err != nil {
 		return err
@@ -275,7 +288,7 @@ func run(cmd *cobra.Command, args []string) (retErr error) {
 		containerSuffix = images.SUFFIX
 	}
 	if containerSuffix != "" {
-		clusterImage = fmt.Sprintf("%s/%s%s", containerOrg, cluster, containerSuffix)
+		clusterImage = fmt.Sprintf("%s/%s:%s", containerOrg, cluster, containerSuffix)
 	} else {
 		clusterImage = path.Join(containerOrg, cluster)
 	}
@@ -433,6 +446,26 @@ func run(cmd *cobra.Command, args []string) (retErr error) {
 	wg.Add(int(nodes))
 	// start one vm after each other
 	macCounter := 0
+
+	logrus.Info("sriov build")
+	sriovDevicesCountTotal := len(sriovDevicesPciAddrs)
+	requiredSriovDevicesCount := int(sriovDevicesPerNode) * int(nodes)
+	if sriovDevicesCountTotal < requiredSriovDevicesCount {
+		return fmt.Errorf("There are not enough SRIOV VF devices: requested %d per node, but got %d devices", sriovDevicesPerNode, len(sriovDevicesPciAddrs))
+	}
+
+	logrus.Info("build sriov devices pci addresses per node list")
+	sriovDeviceCountPerNode := int(sriovDevicesPerNode)
+	start := 0
+	end := (sriovDeviceCountPerNode - 1)
+	sriovDevicesPciAddrListPerNodeList := [][]string{}
+	for nodeIdx := 0; nodeIdx < int(nodes); nodeIdx++ {
+		currentNodeSriovDevicessAddrs := sriovDevicesPciAddrs[start : end+1]
+		sriovDevicesPciAddrListPerNodeList = append(sriovDevicesPciAddrListPerNodeList, currentNodeSriovDevicessAddrs)
+		start = end + 1
+		end = start + (sriovDeviceCountPerNode - 1)
+	}
+
 	for x := 0; x < int(nodes); x++ {
 
 		nodeQemuArgs := qemuArgs
@@ -459,15 +492,16 @@ func run(cmd *cobra.Command, args []string) (retErr error) {
 		}
 		volumes <- vol.Name
 
-		// assign a GPU to one node
 		var deviceMappings []container.DeviceMapping
+		// assign a GPU to one node
+		var gpuDeviceMappings []container.DeviceMapping
 		if gpuAddress != "" && x == int(nodes)-1 {
 			iommu_group, err := getPCIDeviceIOMMUGroup(gpuAddress)
 			if err != nil {
 				return err
 			}
 			vfioDevice := fmt.Sprintf("/dev/vfio/%s", iommu_group)
-			deviceMappings = []container.DeviceMapping{
+			gpuDeviceMappings = []container.DeviceMapping{
 				{
 					PathOnHost:        "/dev/vfio/vfio",
 					PathInContainer:   "/dev/vfio/vfio",
@@ -481,6 +515,36 @@ func run(cmd *cobra.Command, args []string) (retErr error) {
 			}
 			nodeQemuArgs = fmt.Sprintf("%s -device vfio-pci,host=%s", nodeQemuArgs, gpuAddress)
 		}
+		deviceMappings = append(deviceMappings, gpuDeviceMappings...)
+
+		// assign a SRIOV VF's devices to nodes
+		var sriovDeviceMappings []container.DeviceMapping
+		if sriovDeviceCountPerNode > 0 {
+			sriovDeviceMappings = []container.DeviceMapping{
+				{
+					PathOnHost:        "/dev/vfio/vfio",
+					PathInContainer:   "/dev/vfio/vfio",
+					CgroupPermissions: "mrw",
+				},
+			}
+			currentNodeSriovDevicesPciAddrList := sriovDevicesPciAddrListPerNodeList[x]
+			for _, sriovDevicePciAddr := range currentNodeSriovDevicesPciAddrList {
+				iommu_group, err := getPCIDeviceIOMMUGroup(sriovDevicePciAddr)
+				if err != nil {
+					return err
+				}
+				currentSriovDeviceVfioDevice := fmt.Sprintf("/dev/vfio/%s", iommu_group)
+				sriovDeviceMappings = append(sriovDeviceMappings,
+					container.DeviceMapping{
+						PathOnHost:        currentSriovDeviceVfioDevice,
+						PathInContainer:   currentSriovDeviceVfioDevice,
+						CgroupPermissions: "mrw",
+					})
+
+				nodeQemuArgs = fmt.Sprintf("%s -device vfio-pci,host=%s", nodeQemuArgs, sriovDevicePciAddr)
+			}
+		}
+		deviceMappings = append(deviceMappings, sriovDeviceMappings...)
 
 		additionalArgs := []string{}
 		if len(nodeQemuArgs) > 0 {
@@ -576,6 +640,18 @@ func run(cmd *cobra.Command, args []string) (retErr error) {
 			if err != nil {
 				logrus.Errorf("failed to create mount for etcd data on node %s: %v", nodeName, err)
 				return err
+			}
+		}
+
+		if sriovDeviceCountPerNode > 0 {
+			// move the assigned PCI device to a vfio-pci driver to prepare for assignment
+			if sriovDevicesPciAddrListPerNodeList[x] != nil {
+				for _, sriovDeviceAddr := range sriovDevicesPciAddrListPerNodeList[x] {
+					err = prepareDeviceForAssignment(cli, nodeContainer(prefix, nodeName), "", sriovDeviceAddr)
+					if err != nil {
+						return err
+					}
+				}
 			}
 		}
 
@@ -760,7 +836,9 @@ func getDevicePCIID(pciAddress string) (string, error) {
 func prepareDeviceForAssignment(cli *client.Client, nodeContainer, pciID, pciAddress string) error {
 	devicePCIID := pciID
 	if pciAddress != "" {
+		logrus.Infof("DEBUG: prepareDeviceForAssignment-PASS devicePCIID: %+v", devicePCIID)
 		devicePCIID, _ = getDevicePCIID(pciAddress)
+		logrus.Infof("DEBUG: prepareDeviceForAssignment-PASS devicePCIID: %+v", devicePCIID)
 	}
 	success, err := docker.Exec(cli, nodeContainer, []string{
 		"/bin/bash",
