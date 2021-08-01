@@ -138,5 +138,31 @@ function up() {
             "$VFS_DRIVER" \
             "kubevirt.io" "sriov_net" \
             "$SRIOV_NODE_LABEL_KEY" "$SRIOV_NODE_LABEL_VALUE"
+        
+        # update sriov-cni binary on each node to support vfs on vms
+        sriov_cni_vf_on_vms_repo="/root/go/src/k8snetworkplumbingwg/sriov-cni"
+        repo="https://github.com/k8snetworkplumbingwg/sriov-cni"
+        binary_name=sriov
+        binary_path="build/$binary_name"
+        (
+            tmp=$(mktemp -d)
+            pushd $tmp
+            git clone $repo --depth 1
+            cd sriov-cni
+            git fetch $repo pull/121/head:pr121
+            git checkout pr121
+            make
+            binary_path=$(realpath $binary_path)
+            popd
+        )
+        for i in $(seq $KUBEVIRT_NUM_NODES); do  
+            node="${KUBEVIRT_PROVIDER}-node0${i}"
+            docker cp ${binary_path} ${node}:/ 
+            node_cmd="docker exec -it ${node}"
+            ${node_cmd} bash -c "sudo scp -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -i vagrant.key ${binary_name} vagrant@192.168.66.10${i}:/home/vagrant"
+            ${node_cmd} bash -c "ssh.sh sudo mv ${binary_name} /opt/cni/bin/"
+            ${node_cmd} bash -c "ssh.sh sudo chown root:root /opt/cni/bin/${binary_name}"
+            ${node_cmd} bash -c "ssh.sh sudo ls -lsht /opt/cni/bin/${binary_name}"
+        done
     fi
 }
